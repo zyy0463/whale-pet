@@ -1,0 +1,74 @@
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>小鲸鱼 · 桌宠</title>
+<!--
+  v1 2026-09-23：独立页薄壳 —— 桌宠本体在 pet/pet.js（壳里也用它，不是这儿另写一份）。
+  用途：① 直接开这个地址看/调；② 路线 B 备份（动态壁纸类 App 挂这个 URL）。
+  透明背景；画布整块不收指针，手势在 window 捕获层按像素判「有没有压在鲸鱼身上」，
+  所以只有鲸鱼本身吃拖/点，空白处的触摸会漏到下层（别处照常操作）。
+  v171：加 ?dev=1 的控制面板（只在带这个参数时出现）——逐个点状态看效果，还能放大看细节。
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; pointer-events: none; }
+  #dev { position: fixed; left: 10px; top: 10px; z-index: 9; pointer-events: auto;
+         max-width: min(94vw, 340px); padding: 10px 12px 12px; border-radius: 12px;
+         background: rgba(18, 22, 34, .84); color: #fff; backdrop-filter: blur(6px);
+         font: 12px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-height: 88vh; overflow: auto; }
+  #dev h4 { margin: 2px 0 6px; font-size: 12px; font-weight: 600; opacity: .62; letter-spacing: .04em; }
+  #dev button { margin: 0 5px 5px 0; padding: 4px 9px; border: 0; border-radius: 7px;
+                background: #2b3350; color: #e8ecff; font: inherit; cursor: pointer; }
+  #dev button:hover { background: #3a4674; }
+  #dev .now { margin-top: 6px; opacity: .8; }
+  #dev .now b { color: #8ab4ff; }
+  #dev .hint { margin-top: 6px; opacity: .6; }
+</style>
+</head>
+<body>
+<script src="pet.js?v=67"></script>
+<script>
+window.QiaomuPet && window.QiaomuPet.mount();
+
+/* ── 开发面板（只在 ?dev=1 时出现）：逐个点着看每种状态长什么样 ── */
+(function () {
+  if (location.search.indexOf("dev=1") < 0) return;
+  var P = window.QiaomuPet;
+  if (!P) return;
+  var GROUPS = [
+    ["已有状态", [["idle", "闲"], ["thinking", "在想"], ["working", "动手"],
+                  ["notification", "新唤醒"], ["sleeping", "睡"], ["error", "出错"]]],
+    ["新增动作", [["happy", "开心弹跳"], ["looking", "疑惑"],
+                  ["yawn", "困倦打哈欠"], ["shy", "害羞脸红"],
+                  ["sad", "难过"], ["angry", "生气"]]]
+  ];
+  var box = document.createElement("div");
+  box.id = "dev";
+  var html = "<h4>点一个，看 10 分钟（auto 交回自动）</h4>";
+  GROUPS.forEach(function (grp) {
+    html += "<h4>" + grp[0] + "</h4>";
+    grp[1].forEach(function (s) {
+      html += '<button data-s="' + s[0] + '">' + s[1] + "</button>";
+    });
+  });
+  html += '<h4>自动 / 放大</h4><button data-s="auto">自动</button>'
+        + '<button data-k="1">1×</button><button data-k="2">2×</button>'
+        + '<button data-k="4">4×</button><button data-k="0">按屏宽</button>'
+        + '<div class="now">当前：<b id="devnow">-</b></div>'
+        + '<div class="hint">拖鲸鱼：拖拽留尾 + 松手惯性</div>';
+  box.innerHTML = html;
+  box.addEventListener("click", function (e) {
+    var t = e.target, s = t.getAttribute && t.getAttribute("data-s");
+    var k = t.getAttribute && t.getAttribute("data-k");
+    if (s) P.setState(s, s === "auto" ? 0 : 600);
+    if (k) P.setScale(Number(k));
+  });
+  document.body.appendChild(box);
+  var now = box.querySelector("#devnow");
+  setInterval(function () { now.textContent = P.state() + " · " + P.scale + "×"; }, 250);
+})();
+</script>
+</body>
+</html>

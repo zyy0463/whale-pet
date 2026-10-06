@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>鲸鱼像素编辑器</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #1a1a2e; color: #eee; padding: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .toolbar button, .toolbar label { padding: 6px 12px; border: 1px solid #444; border-radius: 6px; background: #2a2a4a; color: #eee; cursor: pointer; font-size: 13px; }
+  .toolbar button:hover { background: #3a3a5a; }
+  .toolbar button.active { background: #4a4a7a; border-color: #8af; }
+  .color-btn { width: 28px; height: 28px; padding: 0; border: 2px solid #444; border-radius: 4px; }
+  .color-btn.c1 { background: #4D6BFE; }
+  .color-btn.c2 { background: #FFFFFF; }
+  .color-btn.c3 { background: #42CCFD; }
+  .color-btn.c4 { background: #FF5A5A; }
+  .color-btn.c0 { background: #333; }
+  .color-btn.active { border-color: #8af; }
+  .info { font-size: 12px; color: #9ad; margin-left: 8px; }
+  .canvas-wrap { overflow: auto; max-height: calc(100vh - 120px); border: 1px solid #333; background: #0f0f1e; }
+  canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+  .coord { position: fixed; bottom: 8px; right: 12px; background: rgba(0,0,0,.7); padding: 4px 10px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <button id="moveBtn" class="active">✋ 移动</button>
+  <button id="paintBtn">🖌 画笔</button>
+  <button id="eraseBtn">🧽 橡皮</button>
+  <span style="margin:0 4px;">|</span>
+  <span style="font-size:12px;">颜色:</span>
+  <button class="color-btn c1 active" data-color="1"></button>
+  <button class="color-btn c2" data-color="2"></button>
+  <button class="color-btn c3" data-color="3" title="泪滴浅蓝（#42CCFD，难过泪滴用色）"></button>
+  <button class="color-btn c4" data-color="4" title="红色（#FF5A5A，生气用色）—— 画完把矩阵给我，我把 4=红 接进渲染"></button>
+  <button class="color-btn c0" data-color="0"></button>
+  <span style="margin:0 4px;">|</span>
+  <span style="font-size:12px;">格子:</span>
+  <button class="zoom-btn" data-cell="10">小</button>
+  <button class="zoom-btn active" data-cell="14">中</button>
+  <button class="zoom-btn" data-cell="20">大</button>
+  <button class="zoom-btn" data-cell="28">特大</button>
+  <span style="margin:0 4px;">|</span>
+  <button id="rotLBtn">⟲ 左转</button>
+  <button id="rotRBtn">⟳ 右转</button>
+  <button id="mirHBtn">⇋ 左右镜像</button>
+  <button id="mirVBtn">⇵ 上下镜像</button>
+  <button id="selClearBtn">✕ 取消选区</button>
+  <span class="info" id="selInfo"></span>
+  <span style="margin:0 4px;">|</span>
+  <button id="undoBtn">↶ 撤销 (Ctrl+Z)</button>
+  <button id="redoBtn">↷ 重做</button>
+  <span style="margin:0 4px;">|</span>
+  <button id="exportBtn">💾 导出 JSON</button>
+  <button id="importBtn">📂 导入 JSON</button>
+  <button id="copyBtn">📋 复制矩阵</button>
+  <button id="resetBtn">↺ 重置</button>
+  <span style="margin:0 4px;">|</span>
+  <label><input type="checkbox" id="gridChk" checked> 网格线</label>
+  <label><input type="checkbox" id="coordChk" checked> 坐标</label>
+  <span class="info" id="modeInfo">移动模式：点有色格选中/再点取消，按住拖=框选；拖选区整体移动；按钮旋转/镜像；右键删格子</span>
+</div>
+<div class="canvas-wrap">
+  <canvas id="cv"></canvas>
+</div>
+<div class="coord" id="coord"></div>
+
+<script src="whale.js?v=1"></script>
+<script>
+(function(){
+  var CELL = 14;
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var WW = QiaomuWhale.W, HH = QiaomuWhale.H;   // whale.js 原始 70×53（红线内才是现素材）
+  var PAD_R = 40, PAD_B = 20;                    // v199 扩展底盘：右 +40 / 下 +20，留空画尾巴
+  var W = WW + PAD_R, H = HH + PAD_B;            // 编辑器总网格 110×73
+  function baseGrid(){                           // 鲸鱼在左上 70×53，扩展区补 '0'
+    var g = [];
+    for (var y = 0; y < H; y++) {
+      var src = (y < HH) ? (QiaomuWhale.GRID[y] || '') : '';
+      var row = [];
+      for (var x = 0; x < W; x++) row.push(x < WW ? (src.charAt(x) || '0') : '0');
+      g.push(row);
+    }
+    return g;
+  }
+  var grid = baseGrid();
+  var origGrid = baseGrid();
+  cv.width = W * CELL; cv.height = H * CELL;
+  var mode = 'move';
+  var curColor = '1';
+  var showGrid = true, showCoord = true;
+  var history = [], future = [], maxHist = 200;
+
+  function snapshot(){ return grid.map(function(r){ return r.slice(); }); }
+  function pushHist(){ history.push(snapshot()); if(history.length>maxHist) history.shift(); future.length=0; }
+  function undo(){ if(!history.length) return; future.push(snapshot()); grid = history.pop(); render(); }
+  function redo(){ if(!future.length) return; history.push(snapshot()); grid = future.pop(); render(); }
+
+  function cellColor(ch){
+    if(ch==='1') return '#4D6BFE';
+    if(ch==='2') return '#FFFFFF';
+    if(ch==='3') return '#42CCFD';               // v218：浅蓝（泪滴色）——这次她是挖洞画的泪，以后能直接画
+    if(ch==='4') return '#FF5A5A';               // v230：红（生气用色）
+    return null;
+  }
+
+  function render(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    for(var y=0;y<H;y++){
+      for(var x=0;x<W;x++){
+        var c = cellColor(grid[y][x]);
+        if(c){ ctx.fillStyle = c; ctx.fillRect(x*CELL, y*CELL, CELL, CELL); }
+      }
+    }
+    // v199 选区高亮 + 框选/拖动预览
+    for (var k in sel){
+      var sa = k.split(',');
+      ctx.strokeStyle = '#8f8'; ctx.lineWidth = 2;
+      ctx.strokeRect((+sa[0])*CELL+1, (+sa[1])*CELL+1, CELL-2, CELL-2);
+    }
+    if(mvRect){
+      var rx = Math.min(mvRect.x0,mvRect.x1), ry = Math.min(mvRect.y0,mvRect.y1);
+      var rw = (Math.abs(mvRect.x1-mvRect.x0)+1)*CELL, rh = (Math.abs(mvRect.y1-mvRect.y0)+1)*CELL;
+      ctx.strokeStyle = '#ffd54d'; ctx.lineWidth = 2; ctx.setLineDash([5,3]);
+      ctx.strokeRect(rx*CELL, ry*CELL, rw, rh);
+      ctx.setLineDash([]);
+    }
+    if(mvOffset){
+      ctx.globalAlpha = 0.55;
+      for (var k2 in sel){
+        var sb = k2.split(','); var bx = (+sb[0])+mvOffset.dx, by = (+sb[1])+mvOffset.dy;
+        var col = cellColor(grid[+sb[1]][+sb[0]]);
+        if(col){ ctx.fillStyle = col; ctx.fillRect(bx*CELL, by*CELL, CELL, CELL); }
+      }
+      ctx.globalAlpha = 1;
+    }
+    if(showGrid){
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+      for(var x=0;x<=W;x++){ ctx.beginPath(); ctx.moveTo(x*CELL+0.5,0); ctx.lineTo(x*CELL+0.5,H*CELL); ctx.stroke(); }
+      for(var y=0;y<=H;y++){ ctx.beginPath(); ctx.moveTo(0,y*CELL+0.5); ctx.lineTo(W*CELL,y*CELL+0.5); ctx.stroke(); }
+      ctx.strokeStyle = 'rgba(255,180,80,0.35)'; ctx.lineWidth = 1;
+      for(var x=0;x<=W;x+=5){ ctx.beginPath(); ctx.moveTo(x*CELL+0.5,0); ctx.lineTo(x*CELL+0.5,H*CELL); ctx.stroke(); }
+      for(var y=0;y<=H;y+=5){ ctx.beginPath(); ctx.moveTo(0,y*CELL+0.5); ctx.lineTo(W*CELL,y*CELL+0.5); ctx.stroke(); }
+      // whale.js 边界（红虚线）：界内 = 现素材 70×53；界外 = 扩展区，落码时我来换算
+      ctx.setLineDash([4,3]);
+      ctx.strokeStyle = 'rgba(255,90,90,0.6)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(WW*CELL+0.5, 0); ctx.lineTo(WW*CELL+0.5, H*CELL); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, HH*CELL+0.5); ctx.lineTo(W*CELL, HH*CELL+0.5); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,110,110,0.85)'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+      ctx.fillText('whale.js 边界 ' + WW + '×' + HH + '（界外=扩展区）', WW*CELL + 4, HH*CELL - 4);
+    }
+    if(showCoord){
+      ctx.fillStyle = 'rgba(255,180,80,0.6)'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      for(var x=0;x<W;x+=5){ ctx.fillText(x, x*CELL+CELL/2, 9); }
+      ctx.textAlign = 'right';
+      for(var y=0;y<H;y+=5){ ctx.fillText(y, 12, y*CELL+CELL/2+3); }
+    }
+  }
+
+  function cellAt(e){
+    var r = cv.getBoundingClientRect();
+    var x = Math.floor((e.clientX - r.left) / CELL);
+    var y = Math.floor((e.clientY - r.top) / CELL);
+    if(x<0||x>=W||y<0||y>=H) return null;
+    return {x:x, y:y};
+  }
+
+  /* ── v199 选区式移动：点选/框选一批格子 → 整体拖动；按钮旋转/镜像 ── */
+  var sel = {}, selCount = 0;                     // 选区（key "x,y"）
+  var mvDown = null, mvRect = null, mvOffset = null, moved = false, lastCell = null;
+  var CLICK_PX = 6;                               // 位移阈值：小于它算点击
+  function K(x, y){ return x + ',' + y; }
+  function updateSelUI(){ document.getElementById('selInfo').textContent = selCount ? ('已选 ' + selCount + ' 格') : ''; }
+  function clearSel(){ sel = {}; selCount = 0; updateSelUI(); }
+  function selCells(){
+    var arr = [];
+    for (var k in sel){ var a = k.split(','); arr.push({x:+a[0], y:+a[1], ch: grid[+a[1]][+a[0]]}); }
+    return arr;
+  }
+  function bboxOf(arr){
+    var b = {minX:1e9, minY:1e9, maxX:-1, maxY:-1};
+    arr.forEach(function(c){
+      if(c.x<b.minX)b.minX=c.x; if(c.x>b.maxX)b.maxX=c.x;
+      if(c.y<b.minY)b.minY=c.y; if(c.y>b.maxY)b.maxY=c.y;
+    });
+    return b;
+  }
+  function applyTarget(cells, target){            // 清源 → 落目标 → 选区跟着过去
+    pushHist();
+    cells.forEach(function(c){ grid[c.y][c.x] = '0'; });
+    sel = {};
+    for (var k in target){
+      var b = k.split(','); var nx = +b[0], ny = +b[1];
+      if(nx<0 || nx>=W || ny<0 || ny>=H) continue;            // 出界丢弃（保险闸）
+      grid[ny][nx] = target[k]; sel[k] = true;
+    }
+    selCount = Object.keys(sel).length;
+    updateSelUI(); render();
+  }
+  function commitTranslate(dx, dy){
+    var cells = selCells(); if(!cells.length) return;
+    var target = {};
+    cells.forEach(function(c){
+      var nx = c.x+dx, ny = c.y+dy;
+      if(nx>=0 && nx<W && ny>=0 && ny<H) target[K(nx,ny)] = c.ch;   // 出界丢弃
+    });
+    applyTarget(cells, target);
+  }
+  function transformSel(fn){                      // 旋转/镜像通用：fn(x,y,bbox)->[nx,ny]
+    var cells = selCells(); if(!cells.length) return;
+    var bb = bboxOf(cells), target = {};
+    cells.forEach(function(c){
+      var n = fn(c.x, c.y, bb);
+      if(n[0]>=0 && n[0]<W && n[1]>=0 && n[1]<H) target[K(n[0], n[1])] = c.ch;   // 出界丢弃
+    });
+    applyTarget(cells, target);
+  }
+  /* 整数精确旋转（锚在 bbox 左上角）：CW/CCW 互为逆、无半像素舍入漂移 */
+  function rotCW(x,y,bb){  return [bb.minX + (y - bb.minY), bb.minY + (bb.maxX - x)]; }
+  function rotCCW(x,y,bb){ return [bb.minX + (bb.maxY - y), bb.minY + (x - bb.minX)]; }
+  function mirH(x,y,bb){ return [bb.minX + (bb.maxX - x), y]; }
+  function mirV(x,y,bb){ return [x, bb.minY + (bb.maxY - y)]; }
+
+  function press(p, cx, cy){                      // 鼠标/触屏共用
+    if(mode==='paint'){ pushHist(); grid[p.y][p.x] = curColor; mvDown = {paint:true}; lastCell = p; render(); return; }
+    if(mode==='erase'){ pushHist(); grid[p.y][p.x] = '0'; mvDown = {erase:true}; lastCell = p; render(); return; }
+    mvDown = {p:p, cx:cx, cy:cy, inSel: !!sel[K(p.x,p.y)]};
+    moved = false; mvRect = null; mvOffset = null;
+  }
+  function dragTo(p, cx, cy){
+    if(!mvDown || !p) return;
+    if(mvDown.paint){ if(lastCell && (lastCell.x!==p.x || lastCell.y!==p.y)){ grid[p.y][p.x] = curColor; lastCell = p; render(); } return; }
+    if(mvDown.erase){ if(lastCell && (lastCell.x!==p.x || lastCell.y!==p.y)){ grid[p.y][p.x] = '0'; lastCell = p; render(); } return; }
+    var dist = Math.hypot(cx - mvDown.cx, cy - mvDown.cy);
+    if(!moved && dist < CLICK_PX) return;
+    moved = true;
+    if(mvDown.inSel){                             // 拖已选中的格子 → 整组跟手
+      var dx = Math.round((cx - mvDown.cx)/CELL), dy = Math.round((cy - mvDown.cy)/CELL);
+      if(!mvOffset || mvOffset.dx!==dx || mvOffset.dy!==dy){ mvOffset = {dx:dx, dy:dy}; render(); }
+    } else {                                      // 从没选中的格子拖 → 框选
+      mvRect = {x0:mvDown.p.x, y0:mvDown.p.y, x1:p.x, y1:p.y}; render();
+    }
+  }
+  function release(){
+    if(!mvDown) return;
+    if(mode==='move'){
+      if(mvDown.inSel){
+        if(mvOffset) commitTranslate(mvOffset.dx, mvOffset.dy);   // 整组移动落位
+        else if(!moved){ delete sel[K(mvDown.p.x, mvDown.p.y)]; selCount--; updateSelUI(); }  // 点已选格=取消该格
+      } else if(!moved){
+        if(grid[mvDown.p.y][mvDown.p.x] !== '0'){                      // 点有色格 = 加入选区
+          if(!sel[K(mvDown.p.x, mvDown.p.y)]){ sel[K(mvDown.p.x, mvDown.p.y)] = true; selCount++; }
+          updateSelUI();
+        }
+        else clearSel();                          // 点空白 = 清空选区
+      } else if(mvRect){                          // 框选提交：矩形内所有有色格
+        sel = {}; selCount = 0;
+        var x0 = Math.min(mvRect.x0,mvRect.x1), x1 = Math.max(mvRect.x0,mvRect.x1);
+        var y0 = Math.min(mvRect.y0,mvRect.y1), y1 = Math.max(mvRect.y0,mvRect.y1);
+        for (var y=y0; y<=y1; y++) for (var x=x0; x<=x1; x++)
+          if(grid[y][x] !== '0'){ sel[K(x,y)] = true; selCount++; }
+        updateSelUI();
+      }
+    }
+    mvDown = null; mvRect = null; mvOffset = null; lastCell = null;
+    render();
+  }
+  cv.addEventListener('mousedown', function(e){
+    var p = cellAt(e); if(!p) return;
+    e.preventDefault(); press(p, e.clientX, e.clientY);
+  });
+  cv.addEventListener('mousemove', function(e){
+    var p = cellAt(e);
+    document.getElementById('coord').textContent = p ? ('行 '+p.y+'  列 '+p.x+'  = '+grid[p.y][p.x]) : '';
+    dragTo(p, e.clientX, e.clientY);
+  });
+  cv.addEventListener('mouseup', function(){ release(); });
+  window.addEventListener('mouseup', function(){ release(); });   // 拖出画布松手也能收尾
+  cv.addEventListener('contextmenu', function(e){
+    e.preventDefault();
+    var p = cellAt(e); if(!p) return;
+    pushHist(); grid[p.y][p.x] = '0';
+    if(sel[K(p.x,p.y)]){ delete sel[K(p.x,p.y)]; selCount--; updateSelUI(); }
+    render();
+  });
+
+  // 触屏（与鼠标同一套 press/drag/release）
+  cv.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    var t = e.touches[0]; var p = cellAt({clientX:t.clientX, clientY:t.clientY}); if(!p) return;
+    press(p, t.clientX, t.clientY);
+  }, {passive:false});
+  cv.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var t = e.touches[0]; var p = cellAt({clientX:t.clientX, clientY:t.clientY});
+    dragTo(p, t.clientX, t.clientY);
+  }, {passive:false});
+  cv.addEventListener('touchend', function(e){
+    e.preventDefault(); release();
+  }, {passive:false});
+
+  // 工具栏
+  function setMode(m){
+    mode = m; clearSel();
+    document.getElementById('moveBtn').classList.toggle('active', m==='move');
+    document.getElementById('paintBtn').classList.toggle('active', m==='paint');
+    document.getElementById('eraseBtn').classList.toggle('active', m==='erase');
+    var info = {
+      move: '移动模式：点有色格选中（再点取消），按住拖=框选；拖选区整体移动；按钮旋转/镜像；右键删格子',
+      paint: '画笔模式：选颜色后拖动画；右键删除',
+      erase: '橡皮模式：拖动擦除'
+    };
+    document.getElementById('modeInfo').textContent = info[m];
+    render();
+  }
+  document.getElementById('moveBtn').onclick = function(){ setMode('move'); };
+  document.getElementById('paintBtn').onclick = function(){ setMode('paint'); };
+  document.getElementById('eraseBtn').onclick = function(){ setMode('erase'); };
+  document.querySelectorAll('.color-btn').forEach(function(b){
+    b.onclick = function(){ curColor = b.dataset.color; document.querySelectorAll('.color-btn').forEach(function(x){x.classList.remove('active');}); b.classList.add('active'); };
+  });
+  document.getElementById('undoBtn').onclick = undo;
+  document.getElementById('redoBtn').onclick = redo;
+  document.querySelectorAll('.zoom-btn').forEach(function(b){
+    b.onclick = function(){
+      CELL = parseInt(b.dataset.cell, 10);
+      cv.width = W * CELL; cv.height = H * CELL;   // 改尺寸会清空画布，必须重渲染
+      document.querySelectorAll('.zoom-btn').forEach(function(x){ x.classList.remove('active'); });
+      b.classList.add('active');
+      render();
+    };
+  });
+  document.getElementById('gridChk').onchange = function(){ showGrid = this.checked; render(); };
+  document.getElementById('coordChk').onchange = function(){ showCoord = this.checked; render(); };
+
+  document.getElementById('resetBtn').onclick = function(){
+    if(!confirm('确定重置为原始鲸鱼素材？所有改动丢失。')) return;
+    pushHist(); grid = origGrid.map(function(r){ return r.slice(); }); clearSel(); render();
+  };
+
+  // v199 选区操作：旋转 / 镜像 / 取消
+  document.getElementById('rotRBtn').onclick = function(){ transformSel(rotCW); };
+  document.getElementById('rotLBtn').onclick = function(){ transformSel(rotCCW); };
+  document.getElementById('mirHBtn').onclick = function(){ transformSel(mirH); };
+  document.getElementById('mirVBtn').onclick = function(){ transformSel(mirV); };
+  document.getElementById('selClearBtn').onclick = function(){ clearSel(); render(); };
+
+  document.getElementById('exportBtn').onclick = function(){
+    var data = {w:W, h:H, whaleW:WW, whaleH:HH, grid: grid.map(function(r){ return r.join(''); })};
+    var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'whale-pixels-'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+  };
+
+  document.getElementById('importBtn').onclick = function(){
+    var inp = document.createElement('input'); inp.type='file'; inp.accept='.json';
+    inp.onchange = function(e){
+      var f = e.target.files[0]; if(!f) return;
+      var r = new FileReader();
+      r.onload = function(){
+        try{
+          var d = JSON.parse(r.result);
+          if(!d.grid || !d.grid.length) throw new Error('没有 grid');
+          pushHist();
+          for(var y=0;y<H;y++){
+            var s = d.grid[y] || '';
+            for(var x=0;x<W;x++){ grid[y][x] = s.charAt(x) || '0'; }
+          }
+          selected = null; render();
+        }catch(err){ alert('导入失败：'+err.message); }
+      };
+      r.readAsText(f);
+    };
+    inp.click();
+  };
+
+  document.getElementById('copyBtn').onclick = function(){
+    var text = grid.map(function(r){ return r.join(''); }).join('\n');
+    navigator.clipboard.writeText(text).then(function(){ alert('矩阵已复制到剪贴板（每行 ' + W + ' 字符，0=透明 1=蓝 2=白 3=浅蓝 4=红）'); });
+  };
+
+  document.addEventListener('keydown', function(e){
+    if(e.ctrlKey && e.key==='z'){ e.preventDefault(); undo(); }
+    else if(e.ctrlKey && e.key==='y'){ e.preventDefault(); redo(); }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
