@@ -8,7 +8,7 @@
 
 > 作者：**Lydia** （GitHub: [@zyy0463](https://github.com/zyy0463)）
 > 仓库：<https://github.com/zyy0463/whale-pet>
-> 协议：MIT（附加署名条款 —— **二传二改必须标注原作者 Lydia**，详见 [LICENSE](./LICENSE)）
+> 协议：MIT（附加署名条款 —— **二传二改必须标注原作者 Lydia**，详见 [NOTICE](./NOTICE)）
 
 ---
 
@@ -140,7 +140,8 @@ whale-pet/
 ├─ pet.html           独立页薄壳（就是调一下 mount()）
 ├─ pixel-editor.html  像素编辑器（画自己的素材用）
 ├─ README.md
-└─ LICENSE
+├─ LICENSE           MIT 协议原文
+└─ NOTICE            附加署名条款（二传二改须标注 Lydia）+ 素材/商标/参考来源说明
 ```
 
 ---
@@ -182,21 +183,19 @@ clawd-on-desk 的代码以 MIT 协议开放、其美术素材保留版权，本�
 
 ## 授权与转载
 
-**MIT + 附加署名条款。**
+**代码部分**以 [MIT](./LICENSE) 协议开源 —— 你可以自由使用、修改、分发、商用。
 
-你可以自由使用、修改、商用、再发布。**唯一的要求**：
+在此之上有一条**附加署名条款**（完整表述见 [NOTICE](./NOTICE)），要求只有一条：
 
 > ### 二传二改必须标注原作者 **Lydia**
 
 - 转载（二传）：在 README 或页面显著位置写明「转载自 Lydia 的小鲸鱼桌宠」，
   并附原仓库链接 <https://github.com/zyy0463/whale-pet>。
 - 修改后发布（二改）：写明「基于 Lydia 的小鲸鱼桌宠修改」，并保留原仓库链接。
-- 不得移除源码头部注释、`LICENSE` 文件与作者署名。
-
-完整条款见 [LICENSE](./LICENSE)。
+- 不得移除源码头部注释、`LICENSE` / `NOTICE` 文件与作者署名。
 
 另：鲸鱼形象取自 DeepSeek 品牌标志，**仅供个人学习交流，请勿商用**，
-也不表示 DeepSeek 官方的认可或关联。
+也不表示 DeepSeek 官方的认可或关联。美术素材的具体说明同样写在 [NOTICE](./NOTICE) 里。
 
 ---
 
